@@ -3,3 +3,5 @@ logs
 render
 
 .venv
+browsergrab/captures
+browsergrab/profile
