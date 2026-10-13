@@ -5,7 +5,7 @@ LLMGRAB := .venv/bin/llmgrab
 .DEFAULT_GOAL := help
 .PHONY: help install html \
         cli-proxy cli-claude cli-replay cli-html cli-analyze cli-jq \
-        web-browser web-tcpdump web-decode web-replay web-html
+        web-browser web-tcpdump web-decode web-replay web-html web-clean
 
 help: ## list targets
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -52,3 +52,6 @@ web-replay: ## terminal replay
 
 web-html: ## HTML replay -> render/web_replay.html
 	$(LLMGRAB) replay web --html $(ARGS)
+
+web-clean: ## after decode: delete pcap, keys.log, Firefox profile (asks first; ARGS="--keep-profile")
+	@$(LLMGRAB) clean $(ARGS)

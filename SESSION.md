@@ -73,6 +73,7 @@ tools to analyze and replay the captures. Two paths:
 | `llmgrab/web/pcap.py` | Passive capture decoder: TCP reassembly, TLS 1.3 decryption, HTTP/2 + HPACK -> `data/web/claude.jsonl` |
 | `llmgrab/web/protobuf.py` | Schemaless protobuf + Connect-RPC framing (claude.ai chat API) |
 | `llmgrab/web/timeline.py` | claude.ai `StreamTimeline` events -> transcript |
+| `llmgrab/web/clean.py` | Deletes pcap, key log and Firefox profile once decoded (checks, then asks) |
 
 ### `llmgrab/cli/addon.py`
 - `responseheaders`: SSE replies (`text/event-stream`) are **streamed through unbuffered**
@@ -130,6 +131,7 @@ make web-tcpdump                  # prints the sudo tcpdump line: run it from an
 make web-browser                  # Firefox with TLS key logging; use claude.ai, then close it
 make web-decode                   # data/web/claude.pcap + keys.log -> data/web/claude.jsonl
 make web-html                     # render/web_replay.html (terminal: make web-replay)
+make web-clean                    # after decode: delete pcap, keys, profile (asks; --keep-profile)
 ```
 
 ## Findings from the captures

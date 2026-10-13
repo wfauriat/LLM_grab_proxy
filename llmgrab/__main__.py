@@ -58,18 +58,20 @@ COMMANDS = {
     "browser": browser,
     "tcpdump": tcpdump,
     "decode": "llmgrab.web.pcap:main",
+    "clean": "llmgrab.web.clean:main",
 }
 HELP = {
     "replay": "Replay conversations: `replay cli|web [--html]` (terminal, or render/*.html)",
     "analyze": "Report over CLI captures (calls, tokens, cache, latency, tools)",
     "decode": "Decrypt data/web/claude.pcap + keys.log into data/web/claude.jsonl",
+    "clean": "After decode: delete pcap, keys.log and Firefox profile (asks first; --keep-profile)",
 }
 
 
 def usage() -> None:
     print(__doc__)
     for group, names in (("CLI grab (Claude Code via proxy)", ["proxy", "claude", "analyze", "jq"]),
-                         ("Web grab (claude.ai via passive capture)", ["browser", "tcpdump", "decode"]),
+                         ("Web grab (claude.ai via passive capture)", ["browser", "tcpdump", "decode", "clean"]),
                          ("Both", ["replay"])):
         print(f"{group}:")
         for name in names:

@@ -59,6 +59,7 @@ make web-browser    # dedicated Firefox profile; log in to claude.ai, chat, clos
                     # then stop tcpdump (Ctrl+C)
 make web-decode     # data/web/claude.pcap + keys.log -> data/web/claude.jsonl (+ connection summary)
 make web-html       # render/web_replay.html (terminal: make web-replay)
+make web-clean      # delete pcap, keys.log and the Firefox profile; keeps claude.jsonl
 ```
 
 - **Start tcpdump before Firefox.** A connection can only be decoded from its first
@@ -67,7 +68,14 @@ make web-html       # render/web_replay.html (terminal: make web-replay)
   writes its TLS secrets to `data/web/keys.log`. Your normal Firefox profile is not
   touched.
 - `keys.log` decrypts the whole capture: treat it like a password.
-- Cleanup: log out of claude.ai in that profile, then delete `data/web/`.
+- `make web-clean` deletes the raw data once decoded. It lists what it will delete and
+  asks first. It refuses while tcpdump or that Firefox is running, or if
+  `claude.jsonl` is missing or older than the pcap.
+  - `ARGS="--keep-profile"` keeps the login for the next capture.
+  - Log out of claude.ai in that window first: deleting the profile doesn't end the
+    session on the server.
+  - Once the pcap is gone, the capture can't be decoded again, for example by an
+    improved decoder.
 
 ## Components
 
@@ -92,6 +100,7 @@ llmgrab/
     pcap.py        pcap + key log -> records (TCP, TLS 1.3, HTTP/2, HPACK, bodies)
     protobuf.py    schemaless protobuf + Connect-RPC stream framing
     timeline.py    claude.ai StreamTimeline events -> transcript
+    clean.py       delete the raw capture data once decoded
 ```
 
 ### Records (JSONL, one HTTP exchange per line)
