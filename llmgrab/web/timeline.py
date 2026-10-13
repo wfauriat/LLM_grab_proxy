@@ -206,21 +206,46 @@ def limits_text(limits: dict | None) -> str:
     return "usage " + " · ".join(parts)
 
 
-def timing(model: Model, msg: dict, prev: dict | None) -> list[str]:
-    """Assistant timing relative to the human message it answers."""
+def turn_timing(model: Model, msg: dict, prev: dict | None) -> dict:
+    """Assistant timing in seconds, relative to the human message it answers (None: unknown)."""
     start = (prev or {}).get("created") or msg["created"]
+
+    def since(t):
+        return t - start if t and start else None
+
+    thinking = [b["end"] - b["start"] for b in model.message_blocks(msg)
+                if b["kind"] == "thinking" and b["start"] and b["end"]]
+    return {"start": start,
+            "started_s": since(msg["created"]) if msg["created"] != start else None,
+            "thinking_s": sum(thinking) if thinking else None,
+            "first_text_s": since(msg["first_text"]),
+            "done_s": since(msg["done"]),
+            "deltas": msg["deltas"]}
+
+
+def usage_levels(limits: dict | None) -> dict[str, float]:
+    """Usage-limit windows -> {name: utilization 0..1}."""
+    out = {}
+    for window in as_list((limits or {}).get("13") or []):
+        util = as_double((window.get("2") or {}).get("3"))
+        if util is not None:
+            out[str(window.get("1"))] = util
+    return out
+
+
+def timing(model: Model, msg: dict, prev: dict | None) -> list[str]:
+    t = turn_timing(model, msg, prev)
     bits = []
-    if msg["created"] and start and msg["created"] != start:
-        bits.append(f"started +{msg['created'] - start:.1f}s")
-    for b in model.message_blocks(msg):
-        if b["kind"] == "thinking" and b["start"] and b["end"]:
-            bits.append(f"thinking {b['end'] - b['start']:.1f}s")
-    if msg["first_text"] and start:
-        bits.append(f"first text +{msg['first_text'] - start:.1f}s")
-    if msg["done"] and start:
-        bits.append(f"done +{msg['done'] - start:.1f}s")
-    if msg["deltas"]:
-        bits.append(f"{msg['deltas']} deltas")
+    if t["started_s"] is not None:
+        bits.append(f"started +{t['started_s']:.1f}s")
+    if t["thinking_s"] is not None:
+        bits.append(f"thinking {t['thinking_s']:.1f}s")
+    if t["first_text_s"] is not None:
+        bits.append(f"first text +{t['first_text_s']:.1f}s")
+    if t["done_s"] is not None:
+        bits.append(f"done +{t['done_s']:.1f}s")
+    if t["deltas"]:
+        bits.append(f"{t['deltas']} deltas")
     return bits
 
 
@@ -244,12 +269,16 @@ def conversation_items(model: Model, msgs: list[dict]) -> list[Message]:
     return items
 
 
-def build_transcript(records: list[dict], source: str = "") -> Transcript:
+def build_model(records: list[dict]) -> Model:
     model = Model()
     for t, event in timeline_events(records):
         model.apply(t, event)
     model.add_sent(records)
+    return model
 
+
+def build_transcript(records: list[dict], source: str = "") -> Transcript:
+    model = build_model(records)
     conversations = []
     for conv in model.conversations.values():
         msgs = model.ordered(conv)

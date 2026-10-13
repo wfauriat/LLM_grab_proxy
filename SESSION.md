@@ -52,6 +52,9 @@ tools to analyze and replay the captures. Two paths:
   mitmproxy addon.
 - Both paths produce the same JSONL record shape, and both are turned into one
   source-neutral **transcript** model rendered by shared HTML and terminal renderers.
+- The analysis is shared the same way: each source provides a calls / turns table
+  (common columns + its own) and an HTTP exchanges table; the report sections are
+  common, plus a few per source. Times are shown in local time, like the replays.
 
 ## What was built
 
@@ -66,13 +69,15 @@ tools to analyze and replay the captures. Two paths:
 | `llmgrab/replay.py` | `llmgrab replay cli\|web [--html]`: builds the transcript for a source, renders it |
 | `llmgrab/cli/addon.py` | mitmproxy addon: one JSONL record per exchange in `data/cli/YYYY-MM-DD.jsonl` |
 | `llmgrab/cli/sessions.py` | Claude Code specifics: session id, call classification |
-| `llmgrab/cli/analyze.py` | pandas report: calls, per-session totals, cache hit, latency, errors, tool usage, tool-definition sizes; `--csv` export |
+| `llmgrab/analyze.py` | `llmgrab analyze cli\|web\|all`: shared pandas report (calls / turns, per conversation, by kind, errors, HTTP endpoints); `--csv` export |
+| `llmgrab/cli/analyze.py` | CLI rows (tokens, cache hit, latency, tools) + tools called / tool-definition sizes sections |
 | `llmgrab/cli/jqx.sh` | 25 jq recipes to explore records (structure, request, response, search, diffs); prints each command so it can be copied |
 | `llmgrab/cli/history.py` | Claude Code calls -> transcript, showing only what's new in each call |
 | `llmgrab/web/launch_firefox.sh` | Dedicated Firefox profile (HTTP/3 off) writing TLS keys to `data/web/keys.log` |
 | `llmgrab/web/pcap.py` | Passive capture decoder: TCP reassembly, TLS 1.3 decryption, HTTP/2 + HPACK -> `data/web/claude.jsonl` |
 | `llmgrab/web/protobuf.py` | Schemaless protobuf + Connect-RPC framing (claude.ai chat API) |
 | `llmgrab/web/timeline.py` | claude.ai `StreamTimeline` events -> transcript |
+| `llmgrab/web/analyze.py` | Web rows (turn timings, usage levels) + traffic-by-category and timeline-poll sections |
 | `llmgrab/web/clean.py` | Deletes pcap, key log and Firefox profile once decoded (checks, then asks) |
 
 ### `llmgrab/cli/addon.py`
@@ -121,7 +126,7 @@ make                              # list targets; `.venv/bin/llmgrab` lists comm
 # CLI grab
 make cli-proxy                    # terminal 1: reverse proxy on 127.0.0.1:8080
 make cli-claude                   # terminal 2: Claude Code through it
-make cli-analyze                  # ARGS="--csv calls.csv"
+make cli-analyze                  # ARGS="--csv calls.csv"; make analyze: both sources
 make cli-jq ARGS="messages -1"    # jq recipes (no ARGS: list them)
 make -s cli-replay | less -R      # or: llmgrab replay cli [--hide-side] [--full]
 make cli-html                     # render/replay.html
@@ -131,6 +136,7 @@ make web-tcpdump                  # prints the sudo tcpdump line: run it from an
 make web-browser                  # Firefox with TLS key logging; use claude.ai, then close it
 make web-decode                   # data/web/claude.pcap + keys.log -> data/web/claude.jsonl
 make web-html                     # render/web_replay.html (terminal: make web-replay)
+make web-analyze                  # turns, timings, usage levels, traffic, timeline polls
 make web-clean                    # after decode: delete pcap, keys, profile (asks; --keep-profile)
 ```
 
@@ -184,7 +190,6 @@ make web-clean                    # after decode: delete pcap, keys, profile (as
 
 ## Open ideas (not done)
 
-- One shared analysis over both sources (refactoring step 3).
 - Web grab: capture conversations with tools, web search, artifacts, attachments and
   edited / branched messages to map more of the timeline schema; TLS 1.2 / QUIC
   support if ever needed.

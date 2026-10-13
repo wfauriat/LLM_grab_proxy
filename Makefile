@@ -3,9 +3,9 @@
 LLMGRAB := .venv/bin/llmgrab
 
 .DEFAULT_GOAL := help
-.PHONY: help install html \
+.PHONY: help install html analyze \
         cli-proxy cli-claude cli-replay cli-html cli-analyze cli-jq \
-        web-browser web-tcpdump web-decode web-replay web-html web-clean
+        web-browser web-tcpdump web-decode web-replay web-html web-analyze web-clean
 
 help: ## list targets
 	@awk 'BEGIN {FS = ":.*## "} \
@@ -17,6 +17,9 @@ install: ## create .venv and install llmgrab (editable) with its dependencies
 	uv pip install --python .venv/bin/python -e .
 
 html: cli-html web-html ## both HTML replays
+
+analyze: ## report over both sources (ARGS="--csv calls.csv")
+	$(LLMGRAB) analyze all $(ARGS)
 
 ## CLI grab: Claude Code through a local reverse proxy (data/cli/)
 cli-proxy: ## terminal 1: logging proxy on 127.0.0.1:8080
@@ -32,7 +35,7 @@ cli-html: ## HTML replay -> render/replay.html
 	$(LLMGRAB) replay cli --html $(ARGS)
 
 cli-analyze: ## report: calls, tokens, cache, latency, tools (ARGS="--csv calls.csv")
-	$(LLMGRAB) analyze $(ARGS)
+	$(LLMGRAB) analyze cli $(ARGS)
 
 cli-jq: ## jq recipes (ARGS="<recipe> [N] [ARG]"; none: list them) ; use e.g. make -s cli-jq ARGS="overview"
 	$(LLMGRAB) jq $(ARGS)
@@ -52,6 +55,9 @@ web-replay: ## terminal replay
 
 web-html: ## HTML replay -> render/web_replay.html
 	$(LLMGRAB) replay web --html $(ARGS)
+
+web-analyze: ## report: turns, timings, usage levels, traffic, timeline polls
+	$(LLMGRAB) analyze web $(ARGS)
 
 web-clean: ## after decode: delete pcap, keys.log, Firefox profile (asks first; ARGS="--keep-profile")
 	@$(LLMGRAB) clean $(ARGS)

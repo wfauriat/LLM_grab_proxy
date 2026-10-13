@@ -42,7 +42,7 @@ make cli-proxy                   # terminal 1: reverse proxy on 127.0.0.1:8080
 make cli-claude                  # terminal 2: Claude Code through it (ARGS are passed to claude)
 make -s cli-replay | less -R     # terminal replay; ARGS="--hide-side --full --session 8dc6"
 make cli-html                    # render/replay.html
-make cli-analyze                 # report; ARGS="--csv calls.csv"
+make cli-analyze                 # report (make analyze: both sources); ARGS="--csv calls.csv"
 make cli-jq ARGS="messages -1"   # jq recipes; no ARGS lists them
 ```
 
@@ -59,6 +59,7 @@ make web-browser    # dedicated Firefox profile; log in to claude.ai, chat, clos
                     # then stop tcpdump (Ctrl+C)
 make web-decode     # data/web/claude.pcap + keys.log -> data/web/claude.jsonl (+ connection summary)
 make web-html       # render/web_replay.html (terminal: make web-replay)
+make web-analyze    # report: turns, timings, usage levels, traffic, timeline polls
 make web-clean      # delete pcap, keys.log and the Firefox profile; keeps claude.jsonl
 ```
 
@@ -89,17 +90,19 @@ llmgrab/
   render_html.py   transcript -> standalone chat-style page (Markdown, light/dark)
   render_text.py   transcript -> terminal text (colors, truncation)
   replay.py        `llmgrab replay cli|web [--html]`
+  analyze.py       `llmgrab analyze cli|web|all`: shared report sections
   cli/
     addon.py       mitmproxy addon: one record per exchange
     sessions.py    Claude Code specifics: session id, call classification
     history.py     calls -> transcript, keeping only what is new in each call
-    analyze.py     pandas report over the CLI records
+    analyze.py     CLI rows (tokens, cache, tools) + tool sections for the report
     jqx.sh         jq recipes over the CLI records
   web/
     launch_firefox.sh  Firefox with SSLKEYLOGFILE, HTTP/3 off
     pcap.py        pcap + key log -> records (TCP, TLS 1.3, HTTP/2, HPACK, bodies)
     protobuf.py    schemaless protobuf + Connect-RPC stream framing
     timeline.py    claude.ai StreamTimeline events -> transcript
+    analyze.py     web rows (turn timings, usage levels) + traffic / stream sections
     clean.py       delete the raw capture data once decoded
 ```
 
@@ -145,6 +148,29 @@ Both renderers handle every source, so new sources only need a builder.
     browser.
   - Each reply has a footer with timings (start, thinking, first text, done), the
     number of deltas, and usage-limit levels.
+
+### Analysis
+
+`llmgrab analyze cli|web|all [--csv calls.csv]` (`make cli-analyze`, `web-analyze`,
+`analyze`) prints one report over one or both sources. Each source provides:
+
+- **A calls table:** one row per Messages API call (CLI) or assistant turn (web).
+  - Common columns: source, local time, conversation, kind, model, status, `ttfb_s`
+    (until the first output), `duration_s`, `out_chars`.
+  - CLI only: messages, tokens, cache hit, stop reason, tools called.
+  - Web only: start delay, thinking time, deltas, 5h / 7d usage levels.
+  - Columns a source lacks stay empty, never 0.
+- **An exchanges table:** one row per HTTP exchange. Ids in paths (UUIDs, hex,
+  numbers) and content-hashed file names are replaced, so similar calls group as one
+  endpoint.
+
+Shared sections: calls / turns, per conversation, by kind, errors, HTTP endpoints.
+Then each source adds its own:
+- **CLI:** tools called, tool-definition sizes.
+- **Web:** traffic by category (chat RPC, REST API, telemetry, Cloudflare, assets), and
+  `StreamTimeline` polls with their event counts and how each ended.
+
+`--csv` writes the calls table.
 
 ## Fragile parts
 
