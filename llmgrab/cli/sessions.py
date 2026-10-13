@@ -1,39 +1,15 @@
-"""Shared helpers for reading llmgrab captures (logs/*.jsonl). Stdlib only."""
+"""Claude Code specifics of CLI captures: default files, session ids, call classification."""
 
 import json
 from pathlib import Path
 
-DEFAULT_GLOB = "logs/*.jsonl"
+from llmgrab.paths import CLI_LOGS
 
 SUGGESTION_MARKER = "[SUGGESTION MODE"
 
 
 def default_paths() -> list[Path]:
-    return sorted(Path(__file__).resolve().parent.glob(DEFAULT_GLOB))
-
-
-def load_records(paths: list[Path]) -> list[dict]:
-    records = []
-    for path in paths:
-        with open(path, encoding="utf-8") as f:
-            for line_no, line in enumerate(f, 1):
-                if not line.strip():
-                    continue
-                try:
-                    records.append(json.loads(line))
-                except json.JSONDecodeError:
-                    print(f"warning: {path}:{line_no} is not valid JSON, skipped")
-    return records
-
-
-def req_body(rec: dict) -> dict:
-    body = rec["request"]["body"]
-    return body if isinstance(body, dict) else {}
-
-
-def resp_body(rec: dict) -> dict:
-    body = rec["response"]["body"]
-    return body if isinstance(body, dict) else {}
+    return sorted(CLI_LOGS.glob("*.jsonl"))
 
 
 def session_id(req: dict) -> str | None:

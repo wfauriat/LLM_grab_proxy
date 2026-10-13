@@ -1,7 +1,7 @@
 **/__pycache__
-logs
-render
-
+*.egg-info
 .venv
-browsergrab/captures
-browsergrab/profile
+
+# captures and renders hold prompts and personal data
+data
+render

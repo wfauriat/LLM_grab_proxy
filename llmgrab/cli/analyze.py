@@ -1,7 +1,7 @@
-"""Summarize Claude Code API captures written by llmgrab_addon.py.
+"""Summarize Claude Code API captures written by the CLI addon.
 
 Usage:
-    python analyze.py [logs/*.jsonl ...] [--csv calls.csv]
+    llmgrab analyze [data/cli/*.jsonl ...] [--csv calls.csv]
 """
 
 import argparse
@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from logtools import DEFAULT_GLOB, classify, default_paths, load_records, session_id
+from llmgrab.cli.sessions import classify, default_paths, session_id
+from llmgrab.records import load_records
 
 
 def json_len(value) -> int:
@@ -121,11 +122,11 @@ def report(records: list[dict], df: pd.DataFrame) -> None:
             print(f"{size:8,d}  {size / total:5.1%}  {name}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("files", nargs="*", type=Path, help=f"default: {DEFAULT_GLOB}")
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="llmgrab analyze", description=__doc__.splitlines()[0])
+    parser.add_argument("files", nargs="*", type=Path, help="default: data/cli/*.jsonl")
     parser.add_argument("--csv", type=Path, help="also write the per-call table to this CSV")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     paths = args.files or default_paths()
     records = load_records(paths)

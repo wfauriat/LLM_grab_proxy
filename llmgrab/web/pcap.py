@@ -2,21 +2,19 @@
 
 Pipeline: TCP reassembly -> TLS 1.3 record decryption (SSLKEYLOGFILE secrets)
 -> HTTP/2 frames + HPACK -> one JSONL record per stream, in the same shape as
-CLIgrab/llmgrab_addon.py (SSE replies are split into events and rebuilt).
+the CLI addon's records (SSE replies are split into events and rebuilt;
+protobuf / Connect bodies are decoded without a schema).
 
 Usage:
-    .venv/bin/python browsergrab/parse_pcap.py [--pcap P] [--keys K] [-o OUT]
-        [--hosts REGEX] [--max-body N]
+    llmgrab decode [--pcap P] [--keys K] [-o OUT] [--hosts REGEX] [--max-body N]
 """
 
 import argparse
 import bisect
 import json
-import os
 import re
 import socket
 import struct
-import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,11 +26,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
 from mitmproxy.net import encoding
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "CLIgrab"))
-from llmgrab_addon import REDACTED_HEADERS, parse_sse, parse_text, reassemble_message  # noqa: E402
+from llmgrab.paths import KEYLOG, PCAP, WEB_RECORDS, open_private
+from llmgrab.records import parse_sse, parse_text, reassemble_message, redact_headers
+from llmgrab.web.protobuf import decode_connect_stream, decode_proto_safe
 
-HERE = Path(__file__).resolve().parent
-CAPTURES = HERE / "captures"
 DEFAULT_HOSTS = r"(^|\.)(claude\.ai|anthropic\.com)$"
 H2_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
@@ -363,103 +360,7 @@ def h2_streams(conn):
     return streams
 
 
-# --- protobuf / Connect --------------------------------------------------
-
-def read_varint(buf, i):
-    value = shift = 0
-    while True:
-        if i >= len(buf) or shift > 63:
-            raise ValueError("bad varint")
-        b = buf[i]
-        value |= (b & 0x7F) << shift
-        i += 1
-        if not b & 0x80:
-            return value, i
-        shift += 7
-
-
-def looks_like_text(raw):
-    """UTF-8 text without control characters (besides \\n \\r \\t), else None."""
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    return text if all(c.isprintable() or c in "\n\r\t" for c in text) else None
-
-
-def decode_proto(buf, depth=0):
-    """Schemaless protobuf -> {"<field>": value or [values]}. Raises ValueError if not a message.
-
-    Length-delimited fields become text when they read as text, else a nested
-    message when they parse as one, else hex. Varints stay ints; fixed32/64 too.
-    """
-    fields, i = {}, 0
-    while i < len(buf):
-        tag, i = read_varint(buf, i)
-        field, wtype = tag >> 3, tag & 7
-        if field == 0:
-            raise ValueError("field 0")
-        if wtype == 0:
-            value, i = read_varint(buf, i)
-        elif wtype == 1:
-            if i + 8 > len(buf):
-                raise ValueError("short fixed64")
-            value, i = struct.unpack("<Q", buf[i:i + 8])[0], i + 8
-        elif wtype == 5:
-            if i + 4 > len(buf):
-                raise ValueError("short fixed32")
-            value, i = struct.unpack("<I", buf[i:i + 4])[0], i + 4
-        elif wtype == 2:
-            length, i = read_varint(buf, i)
-            if i + length > len(buf):
-                raise ValueError("short bytes")
-            raw, i = buf[i:i + length], i + length
-            # Text wins over a nested message: text deltas often start with "\n", which
-            # can also parse as field 1 of a message.
-            value = looks_like_text(raw)
-            if value is None:
-                try:
-                    value = decode_proto(raw, depth + 1) if raw and depth < 40 else raw.hex()
-                except ValueError:
-                    value = raw.hex()
-        else:
-            raise ValueError(f"wire type {wtype}")
-        fields.setdefault(str(field), []).append(value)
-    return {k: v[0] if len(v) == 1 else v for k, v in fields.items()}
-
-
-def decode_proto_safe(raw):
-    try:
-        return decode_proto(raw)
-    except ValueError:
-        return {"_undecoded_hex": raw.hex()}
-
-
-def decode_connect_stream(raw, content_encoding):
-    """Connect streaming body: frames of flags (1) + length (4) + payload."""
-    messages, i = [], 0
-    while i + 5 <= len(raw):
-        flags, length = raw[i], struct.unpack(">I", raw[i + 1:i + 5])[0]
-        payload, i = raw[i + 5:i + 5 + length], i + 5 + length
-        if flags & 0x1 and content_encoding:
-            payload = encoding.decode(payload, content_encoding)
-        if flags & 0x2:  # end of stream: JSON with error / trailers
-            messages.append({"end_stream": parse_text(payload.decode("utf-8", errors="replace"))})
-        else:
-            messages.append(decode_proto_safe(payload))
-    return messages
-
-
 # --- records -------------------------------------------------------------
-
-def redact(headers):
-    out = {}
-    for name, value in headers:
-        if name.lower() in REDACTED_HEADERS:
-            value = f"<redacted {len(value)} chars>"
-        out[name] = f"{out[name]}, {value}" if name in out else value
-    return out
-
 
 def decode_body(chunks, headers, max_body):
     """(body for the record, raw size, decoded text or None)."""
@@ -506,8 +407,8 @@ def to_record(conn_id, sni, sid, stream, max_body):
         "ttfb_s": round(resp["start"] - start, 3) if resp["start"] and start else None,
         "streamed": "event-stream" in sh.get("content-type", ""),
         "reset": stream["reset"],
-        "request": {"headers": redact(req["headers"]), "body": None},
-        "response": {"headers": redact(resp["headers"]), "body": None},
+        "request": {"headers": redact_headers(req["headers"]), "body": None},
+        "response": {"headers": redact_headers(resp["headers"]), "body": None},
     }
     record["request"]["body"], _, _ = decode_body(req["body"], req["headers"], max_body)
     body, size, text = decode_body(resp["body"], resp["headers"], max_body)
@@ -521,19 +422,22 @@ def to_record(conn_id, sni, sid, stream, max_body):
     else:
         record["response"]["body"] = body
     if resp["trailers"]:
-        record["response"]["trailers"] = redact(resp["trailers"])
+        record["response"]["trailers"] = redact_headers(resp["trailers"])
     return record
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--pcap", type=Path, default=CAPTURES / "claude.pcap")
-    ap.add_argument("--keys", type=Path, default=CAPTURES / "keys.log")
-    ap.add_argument("-o", "--out", type=Path, help="JSONL output (default: <pcap stem>.jsonl next to the pcap)")
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(prog="llmgrab decode", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--pcap", type=Path, default=PCAP)
+    ap.add_argument("--keys", type=Path, default=KEYLOG)
+    ap.add_argument("-o", "--out", type=Path,
+                    help=f"JSONL output (default: {WEB_RECORDS.relative_to(WEB_RECORDS.parents[2])} "
+                         "for the default pcap, else <pcap stem>.jsonl next to it)")
     ap.add_argument("--hosts", default=DEFAULT_HOSTS, help=f"SNI regex to decode (default: {DEFAULT_HOSTS})")
     ap.add_argument("--max-body", type=int, default=2_000_000,
                     help="drop non-SSE text bodies longer than this (0 = keep all)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     keylog = load_keylog(args.keys)
     conns = read_tcp(args.pcap)
@@ -560,10 +464,9 @@ def main():
         notes = ", ".join(f"{v} {k}" for k, v in conn["notes"].items())
         summary.append((conn_id, sni, "ok", notes, len(streams), gap))
 
-    out = args.out or args.pcap.with_suffix(".jsonl")
+    out = args.out or (WEB_RECORDS if args.pcap == PCAP else args.pcap.with_suffix(".jsonl"))
     records.sort(key=lambda r: r["timestamp"] or "")
-    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
+    with open_private(out) as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 

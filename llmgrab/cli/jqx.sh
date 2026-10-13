@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# jq recipes for exploring llmgrab captures (logs/*.jsonl).
+# jq recipes for exploring CLI captures (data/cli/*.jsonl).
 #
-#   ./jqx.sh                    list recipes
-#   ./jqx.sh <recipe> [N] [ARG] run one recipe (N = record index, default -1 = latest)
-#   ./jqx.sh all [N]            run every recipe (output truncated to 25 lines each)
+#   llmgrab jq                    list recipes
+#   llmgrab jq <recipe> [N] [ARG] run one recipe (N = record index, default -1 = latest)
+#   llmgrab jq all [N]            run every recipe (output truncated to 25 lines each)
 #
-# Every recipe prints its command first, so you can copy-paste it. Before pasting, set:
-#   LOG='logs/*.jsonl'; N=-1; ARG=...
+# Every recipe prints its command first, so you can copy-paste it (from the project root).
+# Before pasting, set:
+#   LOG='data/cli/*.jsonl'; N=-1; ARG=...
 # (records across all files are indexed in order: 0 = oldest, -1 = latest)
 
-cd "$(dirname "$0")" || exit 1
-LOG=${LOG:-logs/*.jsonl}
+SELF="$(realpath "$0")"
+cd "$(dirname "$SELF")/../.." || exit 1  # project root
+LOG=${LOG:-data/cli/*.jsonl}
 N=${2:--1}
 ARG=${3:-}
 
@@ -76,7 +78,7 @@ tools() { # tool names + definition size of record N, largest first
     jq -r 'map({name, size: (tojson | length)}) | sort_by(-.size)[] | "\(.size)\t\(.name)"'
 }
 
-tool_def() { # full definition of one tool: ./jqx.sh tool_def -1 Bash
+tool_def() { # full definition of one tool: llmgrab jq tool_def -1 Bash
   jq -s ".[$N].request.body.tools[]? | select(.name == \"$ARG\")" $LOG
 }
 
@@ -136,7 +138,7 @@ errors() { # non-2xx calls with their error body
 
 # ---------------------------------------------------------------- search / compare
 
-grep_calls() { # calls whose request or reply contains ARG: ./jqx.sh grep_calls -1 "plan mode"
+grep_calls() { # calls whose request or reply contains ARG: llmgrab jq grep_calls -1 "plan mode"
   jq -c --arg q "$ARG" 'select(tojson | test($q; "i")) | {t: .timestamp[11:19], id, msgs: (.request.body.messages | length)}' $LOG
 }
 
@@ -159,15 +161,15 @@ RECIPES=(envelope paths types overview sizes req_keys headers betas session syst
          sse_types errors grep_calls diff_system diff_tools)
 
 show() { # print a recipe's description and body
-  echo "### $1 — $(grep -m1 "^$1() {" "$0" | sed 's/.*# //')"
+  echo "### $1 — $(grep -m1 "^$1() {" "$SELF" | sed 's/.*# //')"
   declare -f "$1" | sed '1,2d;$d' | sed 's/^    //'
   echo "---"
 }
 
 case "${1:-}" in
   "")
-    echo "usage: $0 <recipe> [N] [ARG]   |   $0 all [N]"
-    for r in "${RECIPES[@]}"; do printf "  %-14s %s\n" "$r" "$(grep -m1 "^$r() {" "$0" | sed 's/.*# //')"; done
+    echo "usage: llmgrab jq <recipe> [N] [ARG]   |   llmgrab jq all [N]"
+    for r in "${RECIPES[@]}"; do printf "  %-14s %s\n" "$r" "$(grep -m1 "^$r() {" "$SELF" | sed 's/.*# //')"; done
     ;;
   all)
     for r in "${RECIPES[@]}"; do

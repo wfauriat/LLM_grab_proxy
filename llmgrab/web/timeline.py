@@ -1,4 +1,4 @@
-"""Rebuild claude.ai conversations from a decoded browser capture (parse_pcap.py output).
+"""Rebuild claude.ai conversations from a decoded browser capture (web grab, `llmgrab decode` output).
 
 claude.ai streams each conversation over Connect-RPC (StreamTimeline) as protobuf
 events. Without the schema, field numbers below were inferred from the captures:
@@ -13,22 +13,13 @@ events. Without the schema, field numbers below were inferred from the captures:
   delta:        1 block, 2 text to append | 6 thinking title
   usage limits: 13[] window: 1 name, 2.2.1 reset time, 2.3 utilization (double)
 User messages are also read from PerformAction requests (2.1 uuid, 2.3 text, 2.7.2 model).
-
-Usage:
-    .venv/bin/python browsergrab/replay_web.py [captures/claude.jsonl] [-o render/web_replay.html] [--text]
+The result is a source-neutral Transcript (llmgrab.transcript).
 """
 
-import argparse
-import json
-import os
 import struct
-import sys
 from datetime import datetime
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "utils"))
-from replay_html import CSS, esc, markdown, one_line  # noqa: E402
+from llmgrab.transcript import Block, Conversation, Message, Transcript, local_time
 
 ROLES = {1: "human", 2: "assistant"}
 BLOCK_KINDS = {1: "thinking", 2: "text"}
@@ -58,11 +49,6 @@ def unwrap_text(value) -> str:
 def as_double(value) -> float | None:
     """fixed64 kept as int by the schemaless decoder -> IEEE double."""
     return struct.unpack("<d", struct.pack("<Q", value))[0] if isinstance(value, int) else None
-
-
-def load(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
 
 
 def rpc(rec: dict) -> str:
@@ -208,11 +194,7 @@ class Model:
         return text or (msg["sent"] or {}).get("text") or ""
 
 
-# --- rendering -----------------------------------------------------------
-
-def clock(t: float | None, fmt: str = "%H:%M:%S") -> str:
-    return datetime.fromtimestamp(t).strftime(fmt) if t else "?"
-
+# --- transcript ----------------------------------------------------------
 
 def limits_text(limits: dict | None) -> str:
     if not limits:
@@ -242,96 +224,44 @@ def timing(model: Model, msg: dict, prev: dict | None) -> list[str]:
     return bits
 
 
-def render_html(model: Model, source: str) -> str:
-    sections = []
-    for conv in model.conversations.values():
-        msgs = model.ordered(conv)
-        if not msgs:
-            continue
-        out, prev = [], None
-        for msg in msgs:
-            if msg["role"] == "human":
-                note = clock(msg["created"] or (msg["sent"] or {}).get("at"))
-                out.append(f'<div class="user"><div class="note">{esc(note)}</div>'
-                           f'<div class="bubble">{esc(model.human_text(msg).strip())}</div></div>')
-            else:
-                parts = []
-                for b in model.message_blocks(msg):
-                    if b["kind"] == "thinking":
-                        label = " · ".join(x for x in (b["status"], b["title"]) if x) or "Thinking"
-                        parts.append(f'<details class="thinking"><summary>{esc(label)}</summary>'
-                                     '<div class="muted small" style="padding:0 12px 10px">The thinking text '
-                                     'is not sent to the browser: only its status and title.</div></details>')
-                    else:
-                        parts.append(f'<div class="md">{markdown(b["text"])}</div>')
-                meta = timing(model, msg, prev) + [limits_text(msg["limits"])]
-                out.append(f'<div class="assistant"><div class="avatar">✻</div>{"".join(parts)}'
-                           f'<div class="meta">{esc(" · ".join(m for m in meta if m))}</div></div>')
-            prev = msg
-        info = " · ".join(x for x in (clock(msgs[0]["created"], "%Y-%m-%d %H:%M"), conv["model"],
-                                      f"effort {conv['effort']}" if conv["effort"] else "",
-                                      f"{len(msgs)} messages", conv["uuid"]) if x)
-        sections.append(f'<section class="session"><div class="session-head">'
-                        f'<h2>{esc(conv["title"] or "Untitled conversation")}</h2>'
-                        f'<div class="muted small">{esc(info)}</div></div>{"".join(out)}</section>')
-    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
-            f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<title>Web Chat Replay</title><style>{CSS}</style></head><body><main>'
-            f'<header class="page"><h1>claude.ai conversation replay</h1>'
-            f'<div class="muted small">generated {datetime.now():%Y-%m-%d %H:%M} from {esc(source)} '
-            f'(passive browser capture)</div></header>{"".join(sections)}</main></body></html>')
+def conversation_items(model: Model, msgs: list[dict]) -> list[Message]:
+    items, prev = [], None
+    for msg in msgs:
+        if msg["role"] == "human":
+            note = local_time(msg["created"] or (msg["sent"] or {}).get("at"))
+            items.append(Message("user", [Block("text", text=model.human_text(msg).strip())], note=note))
+        else:
+            blocks = []
+            for b in model.message_blocks(msg):
+                if b["kind"] == "thinking":
+                    label = " · ".join(x for x in (b["status"], b["title"]) if x) or "Thinking"
+                    blocks.append(Block("thinking", hidden=True, title=label))
+                else:
+                    blocks.append(Block("text", text=b["text"]))
+            meta = timing(model, msg, prev) + [limits_text(msg["limits"])]
+            items.append(Message("assistant", blocks, reply=True, meta=[m for m in meta if m]))
+        prev = msg
+    return items
 
 
-def render_text(model: Model) -> str:
-    lines = []
-    for conv in model.conversations.values():
-        msgs = model.ordered(conv)
-        if not msgs:
-            continue
-        lines.append(f"=== {conv['title'] or 'Untitled'} · {conv['model']} · effort {conv['effort']}")
-        prev = None
-        for msg in msgs:
-            if msg["role"] == "human":
-                lines.append(f"\n--- you · {clock(msg['created'])}\n{model.human_text(msg).strip()}")
-            else:
-                lines.append(f"\n--- claude · {' · '.join(timing(model, msg, prev))}")
-                for b in model.message_blocks(msg):
-                    if b["kind"] == "thinking":
-                        lines.append(f"[{b['status']}: {one_line(b['title'] or '', 100)}]")
-                    else:
-                        lines.append(b["text"])
-                if msg["limits"]:
-                    lines.append(f"[{limits_text(msg['limits'])}]")
-            prev = msg
-        lines.append("")
-    return "\n".join(lines)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("file", nargs="?", type=Path,
-                        default=Path(__file__).resolve().parent / "captures" / "claude.jsonl")
-    parser.add_argument("-o", "--output", type=Path, default=ROOT / "render" / "web_replay.html")
-    parser.add_argument("--text", action="store_true", help="print the conversation instead of writing HTML")
-    args = parser.parse_args()
-
-    records = load(args.file)
+def build_transcript(records: list[dict], source: str = "") -> Transcript:
     model = Model()
     for t, event in timeline_events(records):
         model.apply(t, event)
     model.add_sent(records)
 
-    if args.text:
-        print(render_text(model))
-        return
-    page = render_html(model, args.file.name)
-    # Conversations are personal data: owner-only file.
-    fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(page)
-    n = sum(1 for c in model.conversations.values() if c["messages"])
-    print(f"wrote {args.output} ({len(page) / 1024:.0f} KB, {n} conversation(s))")
-
-
-if __name__ == "__main__":
-    main()
+    conversations = []
+    for conv in model.conversations.values():
+        msgs = model.ordered(conv)
+        if not msgs:
+            continue
+        info = " · ".join(x for x in (local_time(msgs[0]["created"], "%Y-%m-%d %H:%M"), conv["model"],
+                                      f"effort {conv['effort']}" if conv["effort"] else "",
+                                      f"{len(msgs)} messages", conv["uuid"]) if x)
+        conversations.append(Conversation(conv["uuid"], conv["title"] or "Untitled conversation", info,
+                                          conversation_items(model, msgs)))
+    return Transcript(
+        title="Web Chat Replay",
+        heading="claude.ai conversation replay",
+        subtitle=f"generated {datetime.now():%Y-%m-%d %H:%M} from {source} (passive browser capture)",
+        conversations=conversations)
