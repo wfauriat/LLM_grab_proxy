@@ -4,7 +4,7 @@ LLMGRAB := .venv/bin/llmgrab
 
 .DEFAULT_GOAL := help
 .PHONY: help install html analyze \
-        cli-proxy cli-claude cli-replay cli-html cli-analyze cli-jq \
+        cli-proxy cli-claude cli-replay cli-html cli-analyze cli-jq cli-flatten \
         web-browser web-tcpdump web-decode web-replay web-html web-analyze web-clean
 
 help: ## list targets
@@ -39,6 +39,9 @@ cli-analyze: ## report: calls, tokens, cache, latency, tools (ARGS="--csv calls.
 
 cli-jq: ## jq recipes (ARGS="<recipe> [N] [ARG]"; none: list them) ; use e.g. make -s cli-jq ARGS="overview"
 	$(LLMGRAB) jq $(ARGS)
+
+cli-flatten: ## best-guess flattened model input for one call (ARGS="--list", "--call N --template chatml --marks")
+	$(LLMGRAB) flatten $(ARGS)
 
 ## Web grab: claude.ai in Firefox, passive packet capture (data/web/)
 web-browser: ## Firefox profile logging its TLS keys

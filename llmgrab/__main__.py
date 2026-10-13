@@ -55,6 +55,7 @@ COMMANDS = {
     "replay": "llmgrab.replay:main",
     "analyze": "llmgrab.analyze:main",
     "jq": jq,
+    "flatten": "llmgrab.cli.flatten:main",
     "browser": browser,
     "tcpdump": tcpdump,
     "decode": "llmgrab.web.pcap:main",
@@ -63,6 +64,7 @@ COMMANDS = {
 HELP = {
     "replay": "Replay conversations: `replay cli|web [--html]` (terminal, or render/*.html)",
     "analyze": "Report: `analyze cli|web|all` (calls/turns, conversations, endpoints, timings)",
+    "flatten": "Best-guess model input text for one captured call (--list, --call N, --template)",
     "decode": "Decrypt data/web/claude.pcap + keys.log into data/web/claude.jsonl",
     "clean": "After decode: delete pcap, keys.log and Firefox profile (asks first; --keep-profile)",
 }
@@ -70,7 +72,7 @@ HELP = {
 
 def usage() -> None:
     print(__doc__)
-    for group, names in (("CLI grab (Claude Code via proxy)", ["proxy", "claude", "jq"]),
+    for group, names in (("CLI grab (Claude Code via proxy)", ["proxy", "claude", "jq", "flatten"]),
                          ("Web grab (claude.ai via passive capture)", ["browser", "tcpdump", "decode", "clean"]),
                          ("Both", ["replay", "analyze"])):
         print(f"{group}:")

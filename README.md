@@ -44,6 +44,7 @@ make -s cli-replay | less -R     # terminal replay; ARGS="--hide-side --full --s
 make cli-html                    # render/replay.html
 make cli-analyze                 # report (make analyze: both sources); ARGS="--csv calls.csv"
 make cli-jq ARGS="messages -1"   # jq recipes; no ARGS lists them
+make -s cli-flatten | less       # best-guess flattened model input; ARGS="--list", "--call 9 --template chatml --marks"
 ```
 
 Claude Code honors `ANTHROPIC_BASE_URL`, so no TLS interception is needed, including
@@ -96,6 +97,7 @@ llmgrab/
     sessions.py    Claude Code specifics: session id, call classification
     history.py     calls -> transcript, keeping only what is new in each call
     analyze.py     CLI rows (tokens, cache, tools) + tool sections for the report
+    flatten.py     request -> best-guess flat text the model reads (guessed Anthropic or ChatML template)
     jqx.sh         jq recipes over the CLI records
   web/
     launch_firefox.sh  Firefox with SSLKEYLOGFILE, HTTP/3 off
