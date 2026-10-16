@@ -47,6 +47,10 @@ make cli-jq ARGS="messages -1"   # jq recipes; no ARGS lists them
 make -s cli-flatten | less       # best-guess flattened model input; ARGS="--list", "--call 9 --template chatml --marks"
 ```
 
+`LLMGRAB_CLI_LOGS=/some/dir` makes the proxy write its daily files there instead of
+`data/cli/` (e.g. inside the project being worked on). The replay / analyze commands read
+that directory too when the variable is set, or take the files as arguments.
+
 Claude Code honors `ANTHROPIC_BASE_URL`, so no TLS interception is needed, including
 with a claude.ai subscription login. The variable must be set when the session
 starts. The proxy only listens on `127.0.0.1` and never modifies traffic: streamed

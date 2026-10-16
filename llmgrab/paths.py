@@ -8,7 +8,8 @@ DATA = ROOT / "data"
 RENDER = ROOT / "render"
 
 # Path 1: Claude Code through the mitmproxy reverse proxy.
-CLI_LOGS = DATA / "cli"  # one JSONL file per day
+# One JSONL file per day; LLMGRAB_CLI_LOGS moves it, e.g. into the project being worked on.
+CLI_LOGS = Path(os.environ["LLMGRAB_CLI_LOGS"]) if os.environ.get("LLMGRAB_CLI_LOGS") else DATA / "cli"
 
 # Path 2: passive browser capture.
 WEB = DATA / "web"
