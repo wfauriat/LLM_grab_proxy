@@ -282,12 +282,12 @@ def main(argv: list[str]) -> None:
     if args.list:
         for i, rec in enumerate(calls):
             req = req_body(rec)
-            print(f"{i:4}  {rec.get('timestamp', '')[:19]}  {classify(req):12} {(session_id(req) or '-')[:8]:8} "
+            print(f"{i:4}  {rec.get('timestamp', '')[:19]}  {classify(rec):12} {(session_id(rec) or '-')[:8]:8} "
                   f"{len(req['messages']):4} msgs  {prompt_tokens(rec) or '?':>7} tokens  {req.get('model', '')}")
         return
 
     if args.call is None:
-        rec = next((r for r in reversed(calls) if classify(req_body(r)) == "main"), calls[-1])
+        rec = next((r for r in reversed(calls) if classify(r) == "main"), calls[-1])
     else:
         try:
             rec = calls[args.call]

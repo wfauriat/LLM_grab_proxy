@@ -18,23 +18,26 @@ def json_len(value) -> int:
 
 def to_row(rec: dict) -> dict:
     req, resp = req_body(rec), resp_body(rec)
+    kind = classify(rec)
     usage = resp.get("usage") or {}
 
-    cache_read = usage.get("cache_read_input_tokens") or 0
-    cache_write = usage.get("cache_creation_input_tokens") or 0
-    uncached = usage.get("input_tokens") or 0
-    total_in = uncached + cache_read + cache_write
-    out = usage.get("output_tokens") or 0
+    # token columns stay empty, not 0, for calls without usage (count_tokens, errors)
+    cache_read = usage.get("cache_read_input_tokens") or 0 if usage else None
+    cache_write = usage.get("cache_creation_input_tokens") or 0 if usage else None
+    uncached = usage.get("input_tokens") or 0 if usage else None
+    total_in = uncached + cache_read + cache_write if usage else None
+    out = usage.get("output_tokens") or 0 if usage else None
 
     ttfb, dur = rec.get("ttfb_s"), rec.get("duration_s")
     gen_time = dur - ttfb if ttfb is not None and dur is not None else None
     content = [b for b in resp.get("content") or [] if b]
+    server_tools = usage.get("server_tool_use") or {}
 
     return {
         "source": "cli",
         "time": local_ts(rec["timestamp"]),
-        "conversation": (session_id(req) or "?")[:8],
-        "kind": classify(req),
+        "conversation": (session_id(rec) or "?")[:8],
+        "kind": kind,
         "status": rec["status"],
         "model": req.get("model"),
         "ttfb_s": ttfb,
@@ -52,9 +55,11 @@ def to_row(rec: dict) -> dict:
         "cache_hit": round(cache_read / total_in, 3) if total_in else None,
         "out_tokens": out,
         "thinking_tokens": (usage.get("output_tokens_details") or {}).get("thinking_tokens"),
-        "out_tok_per_s": round(out / gen_time, 1) if gen_time and gen_time > 0 else None,
+        "out_tok_per_s": round(out / gen_time, 1) if out is not None and gen_time and gen_time > 0 else None,
+        "counted_tokens": resp.get("input_tokens") if kind == "count_tokens" else None,
         "stop_reason": resp.get("stop_reason"),
-        "tools_called": ",".join(b["name"] for b in content if b.get("type") == "tool_use"),
+        "tools_called": ",".join(b["name"] for b in content if b.get("type") in ("tool_use", "server_tool_use")),
+        "server_tools": ",".join(f"{name.removesuffix('_requests')}:{n}" for name, n in server_tools.items() if n),
         "error": (resp.get("error") or {}).get("type") if rec["status"] >= 400 else None,
     }
 

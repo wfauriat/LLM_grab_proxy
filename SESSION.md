@@ -1,4 +1,4 @@
-# LLMgrab — session log (2026-10-12 → 2026-10-13)
+# LLMgrab — session log (2026-10-12 → 2026-10-16)
 
 ## Intent
 
@@ -93,8 +93,15 @@ tools to analyze and replay the captures. Two paths:
 - Successful health checks (`/api/hello` with 200) are not logged.
 
 ### `sessions.classify()` call kinds
-`quota_probe` (`max_tokens == 1`), `suggestion` (last user message starts with
-`[SUGGESTION MODE`), `main` (has tools), `side` (everything else: title generation, `-p` without tools).
+In order (since 2026-10-16 it takes the whole record, not the request body, to see the path):
+`count_tokens` (`/v1/messages/count_tokens` path), `quota_probe` (`max_tokens == 1`),
+`suggestion` (last user message starts with `[SUGGESTION MODE`), `web_search` (only server
+tools, e.g. `web_search_20250305` without `input_schema`), `main` (has tools), `web_fetch`
+(last user message starts with `Web page content:`), `side` (everything else: title
+generation, `-p` without tools).
+
+`sessions.session_id()` also takes the record: `metadata.user_id`, else the
+`x-claude-code-session-id` header (count_tokens calls have no metadata).
 
 ### Replays (`replay.py`, `cli/history.py`, `web/timeline.py`)
 - Both sources are turned into one `Transcript` model, rendered by the same HTML and
@@ -113,7 +120,31 @@ tools to analyze and replay the captures. Two paths:
   light/dark mode.
 - Web: one message per user / assistant turn; thinking shows only its status and title
   (the text is never sent to the browser); footer with timings and usage-limit levels.
-- `group_sessions()` groups records by the `session_id` found inside `metadata.user_id`.
+- `group_sessions()` groups records by the `session_id` found inside `metadata.user_id`
+  (or the session header).
+- Added 2026-10-16 (`cli/history.py`), after a capture using WebSearch, WebFetch,
+  `/context` and `/usage`:
+  - Web search and web fetch sub-calls are folded groups ("web search", "web fetch"),
+    no longer main calls breaking the history diff.
+  - A run of count_tokens calls becomes one panel: what was counted → tokens.
+  - Server tool results (`web_search_tool_result`, any `*_tool_result` other than
+    `tool_result`) are attached to their `server_tool_use` / `mcp_tool_use` card from the
+    same reply, as title (page age) + URL lines; encrypted fields are dropped.
+  - Citations: the API splits text into a new block at each citation. Consecutive text
+    blocks are joined back, with `[n]` markers after cited parts and a "Sources:" list
+    of Markdown autolinks (clickable in HTML, readable in the terminal). Reference-style
+    links were tried first and dropped: HTML showed the markers as bare "1" links.
+  - Local commands (`<command-name>`, `<local-command-stdout>`, `<local-command-caveat>`)
+    are folded blocks titled e.g. `local command /effort → Cancelled`, ANSI colors
+    stripped (also in tool results). GUESS: a text block right after a command's output,
+    unless it is the message's last block, is the output's Markdown version for the model.
+  - Reply footer adds server tool use and inner iterations (`web_search ×1 · 2 iterations`).
+- Analysis (`cli/analyze.py`, `analyze.py`): `count_tokens`, `web_search`, `web_fetch`
+  kinds; new `counted_tokens` and `server_tools` columns; `tools_called` includes server
+  tools; token columns stay empty (not 0) for calls without usage; count_tokens calls are
+  left out of the per-conversation section (their ~0.2 s skewed the median duration).
+- `flatten.py` and the jq `session` recipe follow the new `classify` / session id rules;
+  README "Fragile parts" lists the new heuristics.
 
 ## How to use
 
@@ -163,6 +194,29 @@ make web-clean                    # after decode: delete pcap, keys, profile (as
 - Direct custom requests are possible with a Console **API key** (`x-api-key`). The
   subscription OAuth token is meant for Claude Code and should not be reused for
   custom calls.
+
+### CLI grab: tools and local commands (one capture, 2026-10-16, session 9457cdfb)
+- **WebSearch** is a separate API call: same model, its own short system prompt ("You
+  run a web search for another Claude model…"), one message, and only the server tool
+  `web_search_20250305` (`max_uses: 8`). The reply holds `server_tool_use`, a
+  `web_search_tool_result` (9 results with encrypted content), then text split into ~30
+  blocks around citations (`web_search_result_location`: url, title, cited text).
+  Usage reports `server_tool_use.web_search_requests: 1` and 2 `iterations`. No cache
+  is used (13.4k input tokens). Claude Code passes the main model a plain-text tool
+  result ("Web search results for query: …" + a JSON list of links + the summary).
+- **WebFetch** fetches the page locally, then makes one call per URL without tools:
+  system prompt only "You are Claude Code…", user message "Web page content: ---" +
+  the page as Markdown + the prompt. The reply (a summary) becomes the tool result.
+  Two WebFetch calls in one turn ran in parallel.
+- **`/context`** makes 16 `count_tokens` calls in ~0.5 s, with no system prompt and no
+  metadata: one per system prompt section / memory / MCP instructions (as a user
+  message), and tool sets counted with a dummy `foo` message (16 MCP tools 4.7k,
+  `Skill` 0.9k, 12 loaded tools 23.1k, 20 deferred tools 28.1k tokens). Its output reaches the model in the next
+  user message, as the ANSI-colored terminal text plus a Markdown table.
+- **`/usage`**: no request reached the proxy (the dialog was dismissed); unknown whether
+  it uses another host.
+- Local commands are recorded for the model with a `<local-command-caveat>` block, even
+  a cancelled `/effort`.
 
 ### Web grab (one capture, 2026-10-13, 3-turn conversation)
 - The key log covered every Firefox connection; other programs' traffic in the pcap

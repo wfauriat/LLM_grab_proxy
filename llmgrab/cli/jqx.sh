@@ -59,8 +59,9 @@ betas() { # distinct anthropic-beta flags across all calls, with counts
   jq -r '.request.headers["anthropic-beta"] // empty | split(",")[]' $LOG | sort | uniq -c | sort -rn
 }
 
-session() { # session / device / account ids packed in metadata.user_id
-  jq -r '.request.body.metadata.user_id // empty | fromjson | .session_id' $LOG | sort | uniq -c
+session() { # session ids: packed in metadata.user_id, else the x-claude-code-session-id header (count_tokens)
+  jq -r '(.request.body.metadata.user_id // empty | fromjson | .session_id)
+         // .request.headers["x-claude-code-session-id"] // empty' $LOG | sort | uniq -c
 }
 
 system() { # system prompt blocks of record N: length, cache_control, preview

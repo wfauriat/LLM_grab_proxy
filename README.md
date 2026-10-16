@@ -141,8 +141,12 @@ Both renderers handle every source, so new sources only need a builder.
     call is shown. The comparison ignores moving `cache_control` markers and API-added
     fields.
   - The system prompt and tool list appear when they change.
-  - Side calls (session title, prompt suggestion, quota probe) are folded.
-  - Tool calls hold their results, taken from the next request.
+  - Side calls (session title, prompt suggestion, quota probe, web search / fetch
+    sub-calls) are folded; a run of count_tokens calls is one panel.
+  - Tool calls hold their results, taken from the next request (server tools such as
+    `web_search`: from the same reply).
+  - Text split by the API at each citation is joined back, with `[n]` markers and a
+    source list. Local commands are folded, without their terminal colors.
   - Each reply has a footer with stop reason, tokens, cache share and timings.
 - **Web:**
   - User and assistant turns.
@@ -182,11 +186,23 @@ against a handful of captures (2026-10-12/13) and may break when the clients cha
 ### CLI grab: Claude Code internals
 
 - **Call classification** (`cli/sessions.py`) relies on heuristics:
+  - A `/v1/messages/count_tokens` path means a token count (e.g. `/context` sizes each
+    part of the context, tool sets with a dummy `foo` message).
   - `max_tokens == 1` means a quota probe.
   - A last user message starting with `[SUGGESTION MODE` means a prompt suggestion.
-  - A call with tools is a main call; anything else is a side call (title generation,
-    `-p` runs).
-- **Session ids** are read from the JSON string inside `metadata.user_id`.
+  - Only server tools (`web_search_20250305`, no `input_schema`) means the WebSearch
+    tool's sub-call.
+  - A call with tools is a main call.
+  - A last user message starting with `Web page content:` means the WebFetch tool's
+    sub-call (it summarizes the page).
+  - Anything else is a side call (title generation, `-p` runs).
+- **Session ids** are read from the JSON string inside `metadata.user_id`, else from
+  the `x-claude-code-session-id` header (count_tokens calls have no metadata).
+- **Local commands** (`/context`, `/effort`...) reach the model as text blocks in the
+  next user message (`<command-name>`, `<local-command-stdout>` with ANSI colors). The
+  text block right after a command's output, unless it is the message's last block, is
+  taken as that output's Markdown version (`/context` sends one). No request for
+  `/usage` data reached the proxy in the 2026-10-16 capture: it may go to another host.
 - **History diffing** (`cli/history.py`) assumes each main call re-sends the previous
   history unchanged. It ignores `cache_control` (Claude Code moves the marker every
   turn) and string-vs-block content. It compares the previous reply on a few fields

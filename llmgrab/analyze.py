@@ -101,8 +101,9 @@ def present(df: pd.DataFrame, cols: list[str]) -> list[str]:
 # ---------------------------------------------------------------- shared sections
 
 TOKEN_COLS = ["in_uncached", "in_cache_read", "in_cache_write", "out_tokens"]
-EXTRA_CALL_COLS = ["n_msgs", "in_total", "cache_hit", "out_tokens", "stop_reason", "tools_called",
-                   "started_s", "thinking_s", "deltas", "usage_5h", "usage_7d"]
+NO_REPLY_KINDS = ["count_tokens"]  # calls that generate nothing: left out of per-conversation timings
+EXTRA_CALL_COLS = ["n_msgs", "in_total", "cache_hit", "out_tokens", "counted_tokens", "stop_reason", "tools_called",
+                   "server_tools", "started_s", "thinking_s", "deltas", "usage_5h", "usage_7d"]
 
 
 def calls_section(df: pd.DataFrame) -> None:
@@ -112,7 +113,7 @@ def calls_section(df: pd.DataFrame) -> None:
 
 def conversations_section(df: pd.DataFrame) -> None:
     section("Per conversation")
-    ok = df[df.status < 400]
+    ok = df[(df.status < 400) & ~df.kind.isin(NO_REPLY_KINDS)]
     agg = {"start": ("time", "min"), "end": ("time", "max"), "calls": ("kind", "size"),
            "median_ttfb_s": ("ttfb_s", "median"), "median_duration_s": ("duration_s", "median"),
            "out_chars": ("out_chars", "sum")}
